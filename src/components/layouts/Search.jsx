@@ -1,5 +1,4 @@
-import React from 'react';
-import { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { Input } from '@/components/ui/input';
 import { members } from '@/pages/api/members';
 import Fuse from 'fuse.js';
@@ -7,61 +6,61 @@ import { useMember } from '@/context/MemberContext';
 import clsx from 'clsx';
 
 const Search = () => {
-  // Fuse.js for search
-  const options = {
+  const { setMemberItem } = useMember();
+  const listRef = useRef(null);
+  
+  // Create Fuse instance once with useMemo
+  const fuse = useMemo(() => new Fuse(members, {
     threshold: 0.3,
     keys: ['name', 'siteURL', 'year'],
     useExtendedSearch: true,
-  };
-  const fuse = new Fuse(members, options);
+  }), []);
 
-  // initially set to all members
-  const [currMemberState, setCurrMemberState] = useState(
-    members.map(member => ({ item: member }))
-  );
+  // State management
+  const [searchResults, setSearchResults] = useState(members.map(member => ({ item: member })));
+  const [scrollState, setScrollState] = useState({ isAtBottom: false, isAtTop: true });
   
-  // State to track scroll position
-  const [isAtBottom, setIsAtBottom] = useState(false);
-  const [isAtTop, setIsAtTop] = useState(true); // we start at top
-  const listRef = useRef(null);
+  // Handle scroll events - memoized with useCallback
+  const handleScroll = useCallback(() => {
+    if (!listRef.current) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = listRef.current;
+    setScrollState({
+      isAtBottom: scrollTop + clientHeight >= scrollHeight - 1, // -1 for rounding errors
+      isAtTop: scrollTop < 1
+    });
+  }, []);
 
-  // Handle scroll events on the list
-  const handleScroll = () => {
-    if (listRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = listRef.current;
-
-      setIsAtBottom(scrollTop + clientHeight >= scrollHeight);
-      setIsAtTop(scrollTop < 1);
-    }
-  };
-
-  const handleSearch = (e) => {
-    if (!e.target.value) {
-      setCurrMemberState(members.map(member => ({ item: member })));
-    } else {
-      setCurrMemberState(fuse.search(e.target.value));
-    }
-    // Reset scroll position and state when search changes
+  // Handle search input - memoized with useCallback
+  const handleSearch = useCallback((e) => {
+    const query = e.target.value;
+    const results = query 
+      ? fuse.search(query)
+      : members.map(member => ({ item: member }));
+    
+    setSearchResults(results);
+    
+    // Reset scroll position
     if (listRef.current) {
       listRef.current.scrollTop = 0;
-      setIsAtBottom(false);
-      setIsAtTop(true);
+      setScrollState({ isAtBottom: false, isAtTop: true });
     }
-  };
+  }, [fuse]);
 
-  const { setMemberItem } = useMember();
-
-  const shortenURL = (url) => {
+  // URL shortening utility - memoized with useCallback
+  const shortenURL = useCallback((url) => {
     if (typeof url !== 'string') {
       console.error('The provided URL is not a string:', url);
-      return;
+      return '';
     }
     return url.replace(/(^\w+:|^)\/\/(www\.)?/, '');
-  };
+  }, []);
+
+  const { isAtBottom, isAtTop } = scrollState;
 
   return (
     <section className="grid max-w-[600px] min-w-[300px] min-h-full w-full space-y-4 pt-10">
-      {/* search bar */}
+      {/* Search bar */}
       <div className="flex flex-row-reverse items-stretch font-mono text-lg text-secondary max-h-[44px] min-w-full">
         <Input
           className="h-full peer"
@@ -74,7 +73,7 @@ const Search = () => {
         </span>
       </div>
 
-      {/* search results */}
+      {/* Search results */}
       <ul 
         ref={listRef}
         onScroll={handleScroll}
@@ -84,30 +83,26 @@ const Search = () => {
           !isAtTop && 'scroll-not-at-top'
         )}
       >
-        {currMemberState.map((member, index) => {
-          return (
-            <div key={member.item.name} className="flex items-center">
-              <span className="pr-8 text-yellow-500">&gt;</span>
-
-              <li
-                onPointerOver={() => setMemberItem(member.item)}
-                key={member.item.name}
-                className="px-6 py-2.5 font-mono text-sm border-2 border-dotted border-stone-600 hover:bg-stone-800 hover:cursor-crosshair w-full truncate"
-              >
-                <span className={member.item.legacy ? 'text-yellow-700' : ''}>
-                  {member.item.name}
-                </span>
-                &nbsp;|&nbsp;
-                <span className="text-yellow-500 underline transition duration-200 hover:text-yellow-600/40">
-                  <a href={member.item.siteURL} target="_blank" rel="noreferrer">
-                    {shortenURL(member.item.siteURL)}
-                  </a>
-                </span>
-                &nbsp;{!member.item.legacy ? '|' : ''} {member.item.year}
-              </li>
-            </div>
-          );
-        })}
+        {searchResults.map(({ item: member }) => (
+          <div key={member.name} className="flex items-center">
+            <span className="pr-8 text-yellow-500">&gt;</span>
+            <li
+              onPointerOver={() => setMemberItem(member)}
+              className="px-6 py-2.5 font-mono text-sm border-2 border-dotted border-stone-600 hover:bg-stone-800 hover:cursor-crosshair w-full truncate"
+            >
+              <span className={member.legacy ? 'text-yellow-700' : ''}>
+                {member.name}
+              </span>
+              &nbsp;|&nbsp;
+              <span className="text-yellow-500 underline transition duration-200 hover:text-yellow-600/40">
+                <a href={member.siteURL} target="_blank" rel="noreferrer">
+                  {shortenURL(member.siteURL)}
+                </a>
+              </span>
+              &nbsp;{!member.legacy ? '|' : ''} {member.year}
+            </li>
+          </div>
+        ))}
       </ul>
     </section>
   );
